@@ -59,13 +59,13 @@ fn main() {
 
     // ARPACK --------------------------------------------------------------
     let bindings = bindgen::Builder::default()
-        .header("c_code/arpack_sys.h")
+        .header("c_code/arpack.h")
         .generate()
         .expect("Unable to generate ARPACK bindings");
 
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
-        .write_to_file(out_path.join("arpack_ffi.rs"))
+        .write_to_file(out_path.join("arpack_bindings.rs"))
         .expect("Couldn't write ARPACK bindings!");
 
     println!("cargo:rustc-link-lib=dylib=arpack");

@@ -3,4 +3,4 @@
 #![allow(non_snake_case)]
 #![allow(unused)]
 
-include!(concat!(env!("OUT_DIR"), "/arpack_ffi.rs"));
+include!(concat!(env!("OUT_DIR"), "/arpack_bindings.rs"));

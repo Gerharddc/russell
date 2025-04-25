@@ -232,8 +232,9 @@
 pub type StrError = &'static str;
 
 mod aliases;
-mod arpack;
+mod arpack_ffi;
 mod complex_coo_matrix;
+mod complex_eigens;
 mod complex_lin_solver;
 mod complex_solver_klu;
 mod complex_solver_umfpack;
@@ -241,7 +242,6 @@ mod constants;
 mod coo_matrix;
 mod csc_matrix;
 mod csr_matrix;
-mod eigen_solver;
 mod enums;
 mod lin_sol_params;
 mod lin_solver;
@@ -249,6 +249,7 @@ mod numerical_jacobian;
 pub mod prelude;
 mod read_matrix_market;
 mod samples;
+mod solver_arpack;
 mod solver_klu;
 mod solver_umfpack;
 mod stats_lin_sol;
