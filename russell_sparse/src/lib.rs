@@ -232,6 +232,7 @@
 pub type StrError = &'static str;
 
 mod aliases;
+mod arpack;
 mod complex_coo_matrix;
 mod complex_lin_solver;
 mod complex_solver_klu;
@@ -240,6 +241,7 @@ mod constants;
 mod coo_matrix;
 mod csc_matrix;
 mod csr_matrix;
+mod eigen_solver;
 mod enums;
 mod lin_sol_params;
 mod lin_solver;

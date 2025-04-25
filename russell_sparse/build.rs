@@ -1,3 +1,5 @@
+use std::{env, path::PathBuf};
+
 fn main() {
     // SuiteSparse ----------------------------------------------------------
     let libs = vec!["klu", "umfpack"];
@@ -54,4 +56,17 @@ fn main() {
         println!("cargo:rustc-link-lib=dylib=dmumps_cpmech");
         println!("cargo:rustc-link-lib=dylib=zmumps_cpmech");
     }
+
+    // ARPACK --------------------------------------------------------------
+    let bindings = bindgen::Builder::default()
+        .header("c_code/arpack_sys.h")
+        .generate()
+        .expect("Unable to generate ARPACK bindings");
+
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    bindings
+        .write_to_file(out_path.join("arpack_ffi.rs"))
+        .expect("Couldn't write ARPACK bindings!");
+
+    println!("cargo:rustc-link-lib=dylib=arpack");
 }
