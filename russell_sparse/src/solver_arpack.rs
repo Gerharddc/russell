@@ -1,6 +1,5 @@
-use russell_lab::Complex64;
-
 use crate::{arpack_ffi, StrError};
+use russell_lab::Complex64;
 use std::{
     ffi::{c_char, c_int},
     marker::PhantomData,
@@ -163,7 +162,7 @@ pub struct ArpackConfig {
     pub shift: ArpackComplex64,
 }
 
-/// Results returned by the ARPACK solver
+/// Results returned by the ARPACK solver.
 pub struct ArpackResults {
     /// The computed eigenvalues
     pub eigenvalues: Vec<ArpackComplex64>,
@@ -177,36 +176,41 @@ pub struct ArpackResults {
     pub operations_count: usize,
 }
 
-/// The driver is responsible for performing matrix operations on behalf of ARPACK
-pub struct ArpackDriver<'a, S, F, G>
+/// The driver is responsible for performing (possibly sparse) matrix operations on behalf of ARPACK.
+pub struct ArpackDriver<'a, S, FA, FB, FC>
 where
-    F: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64]) + 'a,
-    G: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64], ArpackComplex64) + 'a,
+    FA: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64]) + 'a,
+    FB: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64]) + 'a,
+    FC: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64]) + 'a,
 {
-    /// Configuration parameters
+    /// Arpack configuration parameters.
     cfg: ArpackConfig,
-    /// Function that performs matrix-vector multiplication: A*x.
-    matrix_vector_product: F,
-    /// Function that solves the linear system: (A-sigma*I)*y = x.
-    linear_solve: G,
-    /// The driver's internal state that it could use to store A for instance
-    state: S,
-    /// PhantomData to hold the lifetime
+    /// Perform  y <--- M*x (where x is provided as input).
+    mx_product: FA,
+    /// Perform y <--- OP*x = inv[A-sigma*M]*M*x (where x is provided as input).
+    solve_from_x: FB,
+    /// Perform y <-- OP*x = inv[A-sigma*M]*M*x (where M*x is provided as input).
+    solve_from_mx: FC,
+    /// The driver's internal state that it could use to store matrix values for instance.
+    driver_state: S,
+    /// PhantomData to hold the lifetime.
     _phantom: PhantomData<&'a ()>,
 }
 
-impl<'a, S, F, G> ArpackDriver<'a, S, F, G>
+impl<'a, S, FA, FB, FC> ArpackDriver<'a, S, FA, FB, FC>
 where
-    F: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64]) + 'a,
-    G: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64], ArpackComplex64) + 'a,
+    FA: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64]) + 'a,
+    FB: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64]) + 'a,
+    FC: FnMut(&mut S, &[ArpackComplex64], &mut [ArpackComplex64]) + 'a,
 {
     /// Create a new solver for a standard eigenvalue problem using shift-invert mode
-    pub fn new(cfg: ArpackConfig, matrix_vector_product: F, linear_solve: G, state: S) -> Self {
+    pub fn new(cfg: ArpackConfig, mx_product: FA, solve_from_x: FB, solve_from_mx: FC, driver_state: S) -> Self {
         Self {
             cfg,
-            matrix_vector_product,
-            linear_solve,
-            state,
+            mx_product,
+            solve_from_x,
+            solve_from_mx,
+            driver_state,
             _phantom: PhantomData,
         }
     }
@@ -479,8 +483,7 @@ where
                         }
                     };
 
-                    (self.linear_solve)(&mut self.state, input, output, self.cfg.shift);
-                    // FIXME
+                    (self.solve_from_x)(&mut self.driver_state, input, output);
                 }
                 1 => {
                     // Perform y <-- OP*x = inv[A-sigma*M]*M*x
@@ -511,8 +514,7 @@ where
                         }
                     };
 
-                    (self.linear_solve)(&mut self.state, input, output, self.cfg.shift);
-                    // FIXME
+                    (self.solve_from_mx)(&mut self.driver_state, input, output);
                 }
                 2 => todo!(),
                 3 => unimplemented!(),

@@ -1,11 +1,10 @@
-use russell_lab::Complex64;
-
 use crate::{
     solver_arpack::{
         ArpackComplex64, ArpackConfig, ArpackDriver, ArpackMode, ArpackResults, EigenValueProblem, EigenvaluePosition,
     },
     ComplexCooMatrix, ComplexLinSolver, Genie, StrError,
 };
+use russell_lab::Complex64;
 
 pub struct ComplexDriver<'a> {
     solver: ComplexLinSolver<'a>,
@@ -68,13 +67,13 @@ impl Sigma {
 
 pub fn eigens(
     a_mat: &ComplexCooMatrix,
-    b_mat: Option<&ComplexCooMatrix>,
+    m_mat: Option<&ComplexCooMatrix>,
     num_eigenvalues: usize,
     sigma: Sigma,
     genie: Genie,
 ) -> Result<ArpackResults, StrError> {
     let config = ArpackConfig {
-        bmat: match &b_mat {
+        bmat: match &m_mat {
             Some(_) => EigenValueProblem::Generalized,
             None => EigenValueProblem::Standard,
         },
@@ -88,43 +87,39 @@ pub fn eigens(
         shift: sigma.shift().into(),
     };
 
+    // 1. Form the shifted matrix (A-sigma*M)
+    // 2. Factor this matrix (could cache this if sigma doesn't change)
+
     let mut solver = ComplexLinSolver::new(genie)?;
     solver.actual.factorize(&a_mat, None)?;
 
-    let mut driver = ArpackDriver::new(config, matrix_vector_product, linear_solve, solver);
+    let mut driver = ArpackDriver::new(config, mx_product, solve_from_x, solve_from_mx, solver);
     driver.solve()
 }
 
-/// Computes the matrix-vector product y = A*x
-///
-/// For this example, A is a tridiagonal matrix from the
-/// discretization of a 1D convection-diffusion operator.
+/// Perform  y <--- M*x (where x is provided as input).
 ///
 /// # Parameters:
 /// * `x`: Input vector
-/// * `y`: Output vector, will contain A*x
-fn matrix_vector_product(state: &mut ComplexLinSolver<'_>, x: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
+/// * `y`: Output vector
+fn mx_product(state: &mut ComplexLinSolver<'_>, x: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
     todo!("Implement matrix-vector multiplication");
 }
 
-/// Solves the linear system (A - sigma*I)*y = x
-///
-/// This is the core operation for shift-invert mode.
+/// Perform y <--- OP*x = inv[A-sigma*M]*M*x (where x is provided as input).
 ///
 /// # Parameters:
-/// * `x`: Input vector (right-hand side)
-/// * `y`: Output vector (solution)
-/// * `sigma`: Shift value
-fn linear_solve(
-    state: &mut ComplexLinSolver<'_>,
-    x: &[ArpackComplex64],
-    y: &mut [ArpackComplex64],
-    sigma: ArpackComplex64,
-) {
+/// * `x`: Input vector
+/// * `y`: Output vector
+fn solve_from_x(state: &mut ComplexLinSolver<'_>, x: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
     todo!("Implement linear system solver");
+}
 
-    // Example implementation would:
-    // 1. Form the shifted matrix (A - sigma*I)
-    // 2. Factor this matrix (could cache this if sigma doesn't change)
-    // 3. Solve the linear system
+/// Perform y <--- OP*x = inv[A-sigma*M]*M*x (where x is provided as input).
+///
+/// # Parameters:
+/// * `mx`: Input vector
+/// * `y`: Output vector
+fn solve_from_mx(state: &mut ComplexLinSolver<'_>, mx: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
+    todo!("Implement linear system solver");
 }
