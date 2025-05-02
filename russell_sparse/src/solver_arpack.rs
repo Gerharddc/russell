@@ -11,6 +11,9 @@ use std::{
 // https://github.com/opencollab/arpack-ng/blob/master/SRC/zneupd.f
 // More information is available in the original files.
 //
+// Array indices in comments have been changed from Fortran indices that start at 1
+// to Rust indices that start at 0 but there might be some mistakes so be vigilant.
+//
 // Inspiration has also been taken from the examples:
 // https://github.com/opencollab/arpack-ng/blob/master/EXAMPLES/COMPLEX/zndrv2.f
 // https://github.com/opencollab/arpack-ng/blob/master/EXAMPLES/COMPLEX/zndrv4.f
@@ -415,6 +418,7 @@ where
 
         loop {
             unsafe {
+                // ARPACK reverse communication interface routine.
                 arpack_ffi::znaupd_c(
                     &mut ido,
                     bmat,
@@ -437,17 +441,24 @@ where
             }
 
             if info < 0 {
+                // FIXME: return proper error message
+
                 eprintln!("Error in ARPACK znaupd: {}", info);
                 return Err("Error in ARPACK znaupd");
             }
 
-            // Handle reverse communication // FIXME replace with enum that has numerical repr
             match ido {
-                // FIXME: handle -1 and 1 differently
-                -1 | 1 => {
-                    // Compute y = inv[A-sigma*I]*x
+                -1 => {
+                    // Perform y <--- OP*x = inv[A-SIGMA*M]*M*x
+                    // to force starting vector into the range
+                    // of OP. The user should supply his/her
+                    // own matrix vector multiplication routine
+                    // and a linear system solver. The matrix
+                    // vector multiplication routine should take
+                    // workd(ipntr(0)) as the input. The final
+                    // result should be returned to workd(ipntr(1)).
 
-                    // Fortran indices start at 1 instead of 0
+                    // We need to account for Fortran indices starting at 1 instead of 0
                     let in_start = (ipntr[0] - 1) as usize;
                     let out_start = (ipntr[1] - 1) as usize;
 
@@ -468,8 +479,40 @@ where
                         }
                     };
 
-                    // Call the user-provided linear solver
                     (self.linear_solve)(&mut self.state, input, output, self.cfg.shift);
+                    // FIXME
+                }
+                1 => {
+                    // Perform y <-- OP*x = inv[A-sigma*M]*M*x
+                    // M*x has been saved in workd(ipntr(2)).
+                    // The user only need the linear system
+                    // solver here that takes workd(ipntr(2))
+                    // as input, and returns the result to
+                    // workd(ipntr(1)).
+
+                    // We need to account for Fortran indices starting at 1 instead of 0
+                    let in_start = (ipntr[2] - 1) as usize;
+                    let out_start = (ipntr[1] - 1) as usize;
+
+                    let in_stop = in_start + (n as usize);
+                    let out_stop = out_start + (n as usize);
+
+                    let (input, output) = {
+                        if out_start > in_stop {
+                            let (a, b) = workd.split_at_mut(out_start);
+                            let input = &a[in_start..in_stop];
+                            let output = &mut b[..(n as usize)];
+                            (input, output)
+                        } else {
+                            let (a, b) = workd.split_at_mut(in_start);
+                            let input = &b[..(n as usize)];
+                            let output = &mut a[out_start..out_stop];
+                            (input, output)
+                        }
+                    };
+
+                    (self.linear_solve)(&mut self.state, input, output, self.cfg.shift);
+                    // FIXME
                 }
                 2 => todo!(),
                 3 => unimplemented!(),
@@ -556,7 +599,86 @@ where
         // WORKEV  Complex*16 work array of dimension 2*NCV.  (WORKSPACE)
         let mut workev = vec![ArpackComplex64::zero(); 2 * ncv];
 
+        // The remaining arguments come from the call to znaupd_c.
+        // Some arrays will now contain output values though.
+
+        //  V       Complex*16 N by NCV array.  (INPUT/OUTPUT)
+        //
+        //  Upon INPUT: the NCV columns of V contain the Arnoldi basis
+        //              vectors for OP as constructed by ZNAUPD.
+        //
+        //  Upon OUTPUT: If RVEC = .TRUE. the first NCONV=IPARAM(4) columns
+        //               contain approximate Schur vectors that span the
+        //               desired invariant subspace.
+        //
+        //  NOTE: If the array Z has been set equal to first NEV+1 columns
+        //  of the array V and RVEC=.TRUE. and HOWMNY= 'A', then the
+        //  Arnoldi basis held by V has been overwritten by the desired
+        //  Ritz vectors.  If a separate array Z has been passed then
+        //  the first NCONV=IPARAM(4) columns of V will contain approximate
+        //  Schur vectors that span the desired invariant subspace.
+
+        //  WORKL   Double precision work array of length LWORKL.  (OUTPUT/WORKSPACE)
+        //
+        //  WORKL(1:ncv*ncv+2*ncv) contains information obtained in
+        //  znaupd.  They are not changed by zneupd.
+        //  WORKL(ncv*ncv+2*ncv+1:3*ncv*ncv+4*ncv) holds the
+        //  untransformed Ritz values, the untransformed error estimates of
+        //  the Ritz values, the upper triangular matrix for H, and the
+        //  associated matrix representation of the invariant subspace for H.
+        //
+        //  Note: IPNTR(8:12) contains the pointer into WORKL for addresses
+        //  of the above information computed by zneupd.
+        //  -------------------------------------------------------------
+        //  IPNTR(8):  pointer to the NCV RITZ values of the
+        //             original system.
+        //  IPNTR(9): Not used
+        //  IPNTR(10): pointer to the NCV corresponding error estimates.
+        //  IPNTR(11): pointer to the NCV by NCV upper triangular
+        //             Schur matrix for H.
+        //  IPNTR(12): pointer to the NCV by NCV matrix of eigenvectors
+        //             of the upper Hessenberg matrix H. Only referenced by
+        //             zneupd if RVEC = .TRUE.
+        //  -------------------------------------------------------------
+
+        //  INFO    Integer.  (OUTPUT)
+        //
+        //  Error flag on output.
+        //  =  0: Normal exit.
+        //
+        //  =  1: The Schur form computed by LAPACK routine csheqr
+        //        could not be reordered by LAPACK routine ztrsen.
+        //        Re-enter subroutine zneupd with IPARAM(4)=NCV and
+        //        increase the size of the array D to have
+        //        dimension at least dimension NCV and allocate at least NCV
+        //        columns for Z. NOTE: Not necessary if Z and V share
+        //        the same space. Please notify the authors if this error
+        //        occurs.
+        //
+        //  = -1: N must be positive.
+        //  = -2: NEV must be positive.
+        //  = -3: NCV-NEV >= 1 and less than or equal to N.
+        //  = -5: WHICH must be one of 'LM', 'SM', 'LR', 'SR', 'LI', 'SI'
+        //  = -6: BMAT must be one of 'I' or 'G'.
+        //  = -7: Length of private work WORKL array is not sufficient.
+        //  = -8: Error return from LAPACK eigenvalue calculation.
+        //        This should never happened.
+        //  = -9: Error return from calculation of eigenvectors.
+        //        Informational error from LAPACK routine ztrevc.
+        //  = -10: IPARAM(6) must be 1,2,3
+        //  = -11: IPARAM(6) = 1 and BMAT = 'G' are incompatible.
+        //  = -12: HOWMNY = 'S' not yet implemented
+        //  = -13: HOWMNY must be one of 'A' or 'P' if RVEC = .true.
+        //  = -14: ZNAUPD did not find any eigenvalues to sufficient
+        //         accuracy.
+        //  = -15: ZNEUPD got a different count of the number of converged
+        //         Ritz values than ZNAUPD got. This indicates the user
+        //         probably made an error in passing data from ZNAUPD to
+        //         ZNEUPD or that the data was modified before entering
+        //         ZNEUPD
+
         unsafe {
+            // ARPACK routine that returns Ritz values and (optionally) Ritz vectors.
             arpack_ffi::zneupd_c(
                 rvec,
                 howmny,
