@@ -1,5 +1,4 @@
 use crate::{arpack_ffi, StrError};
-use russell_lab::Complex64;
 use std::{
     ffi::{c_char, c_int},
     marker::PhantomData,
@@ -31,15 +30,6 @@ pub type ArpackComplex64 = arpack_ffi::__BindgenComplex<f64>;
 impl ArpackComplex64 {
     fn zero() -> Self {
         ArpackComplex64 { re: 0.0, im: 0.0 }
-    }
-}
-
-impl From<Complex64> for ArpackComplex64 {
-    fn from(value: Complex64) -> Self {
-        ArpackComplex64 {
-            re: value.re,
-            im: value.im,
-        }
     }
 }
 

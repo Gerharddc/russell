@@ -2,21 +2,48 @@ use crate::{
     solver_arpack::{
         ArpackComplex64, ArpackConfig, ArpackDriver, ArpackMode, ArpackResults, EigenValueProblem, EigenvaluePosition,
     },
-    ComplexCooMatrix, ComplexLinSolver, Genie, StrError,
+    ComplexCooMatrix, ComplexCscMatrix, ComplexLinSolver, Genie, StrError,
 };
-use russell_lab::Complex64;
+use russell_lab::{Complex64, NumVector};
+use static_assertions::{assert_eq_align, assert_eq_size};
 
-pub struct ComplexDriver<'a> {
-    solver: ComplexLinSolver<'a>,
+// Just making sure that Complex64 and ArpackComplex64 are indeed equivalent
+//
+// FIXME: think is this is really useful
+assert_eq_size!(Complex64, ArpackComplex64);
+assert_eq_align!(Complex64, ArpackComplex64);
+
+impl From<Complex64> for ArpackComplex64 {
+    fn from(value: Complex64) -> Self {
+        ArpackComplex64 {
+            re: value.re,
+            im: value.im,
+        }
+    }
 }
 
-impl<'a> ComplexDriver<'a> {
-    fn new(a_mat: &ComplexCooMatrix, genie: Genie) -> Result<Self, StrError> {
-        let mut solver = ComplexLinSolver::new(genie)?;
-        solver.actual.factorize(&a_mat, None)?;
-        //let mut f = Vector::new(n_x);
-        //solver.actual.solve(&mut f, &b_vec, false)?;
-        Ok(Self { solver })
+impl From<ArpackComplex64> for Complex64 {
+    fn from(value: ArpackComplex64) -> Self {
+        Complex64 {
+            re: value.re,
+            im: value.im,
+        }
+    }
+}
+
+fn vec_from_arr(value: &[ArpackComplex64]) -> NumVector<Complex64> {
+    // FIXME: if we can verify that ArpackComplex64 is exactly the same as Complex64 in memory
+    // then we could just use mem::transmute to perform this conversion much more efficiently.
+
+    NumVector::initialized(value.len(), |i| value[i].into())
+}
+
+fn copy_vec_to_arr(arr: &mut [ArpackComplex64], vec: NumVector<Complex64>) {
+    // FIXME: if we can verify that ArpackComplex64 is exactly the same as Complex64 in memory
+    // then we could just use mem::transmute to perform this conversion much more efficiently.
+
+    for (i, val) in vec.into_iter().enumerate() {
+        arr[i] = val.into();
     }
 }
 
@@ -87,14 +114,39 @@ pub fn eigens(
         shift: sigma.shift().into(),
     };
 
-    // 1. Form the shifted matrix (A-sigma*M)
-    // 2. Factor this matrix (could cache this if sigma doesn't change)
-
-    let mut solver = ComplexLinSolver::new(genie)?;
-    solver.actual.factorize(&a_mat, None)?;
-
-    let mut driver = ArpackDriver::new(config, mx_product, solve_from_x, solve_from_mx, solver);
+    let state = DriverState::new(a_mat, m_mat, sigma.shift(), genie)?;
+    let mut driver = ArpackDriver::new(config, mx_product, solve_from_x, solve_from_mx, state);
     driver.solve()
+}
+
+struct DriverState<'a> {
+    solver: ComplexLinSolver<'a>,
+    m_mat: Option<ComplexCscMatrix>,
+    sigma: Complex64,
+}
+
+impl<'a> DriverState<'a> {
+    fn new(
+        a_mat: &'a ComplexCooMatrix,
+        m_mat: Option<&'a ComplexCooMatrix>,
+        sigma: Complex64,
+        genie: Genie,
+    ) -> Result<Self, StrError> {
+        // 1. Form the shifted matrix (A-sigma*M)
+        // 2. Factor this matrix (could cache this if sigma doesn't change)
+
+        let mut solver = ComplexLinSolver::new(genie)?;
+        solver.actual.factorize(&a_mat, None)?;
+        //let mut f = Vector::new(n_x);
+        //solver.actual.solve(&mut f, &b_vec, false)?;
+
+        let m_mat = match m_mat {
+            Some(coo) => Some(ComplexCscMatrix::from_coo(coo)?),
+            None => None,
+        };
+
+        Ok(Self { solver, m_mat, sigma })
+    }
 }
 
 /// Perform  y <--- M*x (where x is provided as input).
@@ -102,8 +154,19 @@ pub fn eigens(
 /// # Parameters:
 /// * `x`: Input vector
 /// * `y`: Output vector
-fn mx_product(state: &mut ComplexLinSolver<'_>, x: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
-    todo!("Implement matrix-vector multiplication");
+fn mx_product(state: &mut DriverState<'_>, x: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
+    match &state.m_mat {
+        Some(m_mat) => {
+            let x = vec_from_arr(x);
+            let mut v = NumVector::new(x.dim());
+            m_mat.mat_vec_mul(&mut v, Complex64::ONE, &x).unwrap();
+            copy_vec_to_arr(y, v);
+        }
+        None => {
+            // M is an identity matrix which has no effect
+            y.clone_from_slice(x);
+        }
+    }
 }
 
 /// Perform y <--- OP*x = inv[A-sigma*M]*M*x (where x is provided as input).
@@ -111,7 +174,7 @@ fn mx_product(state: &mut ComplexLinSolver<'_>, x: &[ArpackComplex64], y: &mut [
 /// # Parameters:
 /// * `x`: Input vector
 /// * `y`: Output vector
-fn solve_from_x(state: &mut ComplexLinSolver<'_>, x: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
+fn solve_from_x(state: &mut DriverState<'_>, x: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
     todo!("Implement linear system solver");
 }
 
@@ -120,6 +183,6 @@ fn solve_from_x(state: &mut ComplexLinSolver<'_>, x: &[ArpackComplex64], y: &mut
 /// # Parameters:
 /// * `mx`: Input vector
 /// * `y`: Output vector
-fn solve_from_mx(state: &mut ComplexLinSolver<'_>, mx: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
+fn solve_from_mx(state: &mut DriverState<'_>, mx: &[ArpackComplex64], y: &mut [ArpackComplex64]) {
     todo!("Implement linear system solver");
 }
